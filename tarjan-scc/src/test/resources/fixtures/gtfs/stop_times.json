@@ -1,0 +1,19 @@
+[
+  {"trip_id": "T1", "stop_id": "B", "stop_sequence": 2},
+  {"trip_id": "T1", "stop_id": "A", "stop_sequence": 1},
+  {"trip_id": "T1", "stop_id": "C", "stop_sequence": 3},
+  {"trip_id": "T2", "stop_id": "C", "stop_sequence": 1},
+  {"trip_id": "T2", "stop_id": "B", "stop_sequence": 2},
+  {"trip_id": "T2", "stop_id": "A", "stop_sequence": 3},
+  {"trip_id": "T3", "stop_id": "C", "stop_sequence": 1},
+  {"trip_id": "T3", "stop_id": "D", "stop_sequence": 2},
+  {"trip_id": "T3", "stop_id": "E", "stop_sequence": 3},
+  {"trip_id": "T4", "stop_id": "E", "stop_sequence": 1},
+  {"trip_id": "T4", "stop_id": "D", "stop_sequence": 2},
+  {"trip_id": "T4", "stop_id": "C", "stop_sequence": 3},
+  {"trip_id": "T5", "stop_id": "E", "stop_sequence": 1},
+  {"trip_id": "T5", "stop_id": "F", "stop_sequence": 2},
+  {"trip_id": "T5", "stop_id": "F", "stop_sequence": 3},
+  {"trip_id": "T_NECUNOSCUT", "stop_id": "A", "stop_sequence": 1},
+  {"trip_id": "T1", "stop_id": "A"}
+]

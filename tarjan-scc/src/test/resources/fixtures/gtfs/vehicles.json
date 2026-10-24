@@ -1,0 +1,4 @@
+[
+  {"id": 101, "label": "1234", "latitude": 47.02, "longitude": 28.84, "route_id": 1, "trip_id": "T1", "timestamp": "2026-10-24T10:00:00Z"},
+  {"id": 102, "label": "5678", "latitude": 47.03, "longitude": 28.89, "route_id": null, "trip_id": null}
+]

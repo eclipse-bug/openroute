@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: tarjan-scc
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: 8080
+
+app:
+  # La pornire: listează operatorii (dacă agency-id lipsește) sau încarcă rețeaua.
+  load-on-startup: true
+
+tranzy:
+  base-url: https://api.tranzy.ai/v1/opendata/
+  # Cheia NU se scrie aici: export TRANZY_API_KEY=...
+  api-key: ${TRANZY_API_KEY:}
+  # Operatorul pentru Chișinău. Gol ⇒ la pornire se afișează lista operatorilor.
+  agency-id: ${TRANZY_AGENCY_ID:}
+  cache-dir: data/cache
+  cache-ttl: 24h
+  vehicles-ttl: 60s
+  max-retries: 4
+  initial-backoff: 1s
+  timeout: 30s
+  load-shapes: false
+
+benchmark:
+  sizes: [100, 1000, 10000, 100000]
+  # Gradul mediu de ieșire al grafurilor aleatoare (m = n · avg-degree).
+  avg-degree: 2.0
+  seed: 42
+  runs: 5
+  warmup-runs: 2
+  naive-max-nodes: 10000
+  results-dir: data/results
