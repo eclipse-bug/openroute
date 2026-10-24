@@ -1,12 +1,11 @@
 package com.eclipse.tarjanapa.service;
 
-import com.eclipse.tarjanapa.algorithms.SccResult;
-import com.eclipse.tarjanapa.algorithms.TarjanIterative;
+import com.eclipse.tarjanapa.algorithms.SccChoice;
 import com.eclipse.tarjanapa.analysis.Benchmark;
 import com.eclipse.tarjanapa.analysis.ClosureAnalysis;
-import com.eclipse.tarjanapa.analysis.CriticalRoutesAnalysis;
 import com.eclipse.tarjanapa.analysis.CsvExporter;
 import com.eclipse.tarjanapa.analysis.LiveAnalysis;
+import com.eclipse.tarjanapa.analysis.NetworkState;
 import com.eclipse.tarjanapa.graph.GraphBuilder;
 import com.eclipse.tarjanapa.model.Agency;
 import com.eclipse.tarjanapa.model.Vehicle;
@@ -24,8 +23,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Punctul central al aplicației: încarcă datele, construiește graful, rulează
- * Tarjan și expune analizele. Folosit atât de API-ul REST, cât și de {@code ConsoleApp}.
+ * Punctul central al aplicației: încarcă datele, construiește graful și expune
+ * analizele, calculate cu algoritmul SCC ales (Tarjan, Kosaraju sau Gabow).
+ * Folosit atât de API-ul REST, cât și de {@code ConsoleApp}.
  */
 @Service
 public class NetworkService {
@@ -33,9 +33,6 @@ public class NetworkService {
     private static final Logger log = LoggerFactory.getLogger(NetworkService.class);
 
     private final TranzyDataSource dataSource;
-    private final ClosureAnalysis closure;
-    private final CriticalRoutesAnalysis critical;
-    private final LiveAnalysis live;
     private final CsvExporter exporter;
     private final BenchmarkProperties benchmarkProps;
 
@@ -44,13 +41,9 @@ public class NetworkService {
     private volatile String lastError = "Datele nu au fost încă încărcate.";
     private volatile Benchmark.Result lastBenchmark;
 
-    public NetworkService(TranzyProperties props, TranzyDataSource dataSource, ClosureAnalysis closure,
-                          CriticalRoutesAnalysis critical, LiveAnalysis live, CsvExporter exporter,
+    public NetworkService(TranzyProperties props, TranzyDataSource dataSource, CsvExporter exporter,
                           BenchmarkProperties benchmarkProps) {
         this.dataSource = dataSource;
-        this.closure = closure;
-        this.critical = critical;
-        this.live = live;
         this.exporter = exporter;
         this.benchmarkProps = benchmarkProps;
         this.agencyId = props.hasAgencyId() ? props.agencyId().trim() : null;
@@ -70,7 +63,8 @@ public class NetworkService {
     }
 
     /**
-     * Încarcă (sau reîncarcă) rețeaua.
+     * Încarcă (sau reîncarcă) rețeaua. Componentele se calculează imediat cu
+     * Tarjan; ceilalți algoritmi rulează la prima cerere.
      *
      * @param forceRefresh true = ignoră cache-ul și descarcă din Tranzy
      */
@@ -78,19 +72,20 @@ public class NetworkService {
         try {
             TranzyDataSource.DatasetLoad dl = dataSource.dataset(agencyId, forceRefresh);
             GraphBuilder.BuildResult built = GraphBuilder.build(dl.dataset());
-            SccResult scc = new TarjanIterative().run(built.graph().intGraph());
 
             List<String> warnings = new ArrayList<>(dl.warnings());
             if (built.graph().stopCount() == 0) {
                 warnings.add("Graful rezultat este gol: verificați că /stop_times conține date pentru acest operator.");
             }
-            NetworkSnapshot s = new NetworkSnapshot(agencyId, Instant.now(), built.graph(), built.report(), scc,
-                    dl.sources(), warnings, critical);
+            NetworkSnapshot s = new NetworkSnapshot(agencyId, Instant.now(), built.graph(), built.report(),
+                    dl.sources(), warnings);
+            NetworkSnapshot.AlgorithmView v = s.view(SccChoice.TARJAN);
             snapshot = s;
             lastError = null;
+            NetworkState st = v.state();
             log.info("Rețea încărcată (agency {}): V={}, E={}, SCC={}, cea mai mare SCC={} ({}%), Tarjan {} ms",
-                    agencyId, s.state().stops(), s.state().edges(), s.state().sccCount(), s.state().largestSize(),
-                    String.format("%.1f", s.state().largestPercent()), String.format("%.2f", scc.elapsedMillis()));
+                    agencyId, st.stops(), st.edges(), st.sccCount(), st.largestSize(),
+                    String.format("%.1f", st.largestPercent()), String.format("%.2f", v.scc().elapsedMillis()));
             return s;
         } catch (TranzyException e) {
             lastError = e.getMessage();
@@ -107,21 +102,26 @@ public class NetworkService {
         return s;
     }
 
+    /** Rezultatele algoritmului ales pe rețeaua curentă. */
+    public NetworkSnapshot.AlgorithmView view(SccChoice choice) {
+        return snapshot().view(choice);
+    }
+
     public boolean isLoaded() {
         return snapshot != null;
     }
 
-    public ClosureAnalysis.ClosureResult simulateClosure(Set<String> routeIds) {
+    public ClosureAnalysis.ClosureResult simulateClosure(Set<String> routeIds, SccChoice choice) {
         NetworkSnapshot s = snapshot();
-        return closure.simulate(s.graph(), s.scc(), routeIds);
+        return new ClosureAnalysis(choice.create()).simulate(s.graph(), s.view(choice).scc(), routeIds);
     }
 
-    public LiveAnalysis.LiveResult live(boolean forceRefresh) {
+    public LiveAnalysis.LiveResult live(boolean forceRefresh, SccChoice choice) {
         NetworkSnapshot s = snapshot();
         List<String> warnings = new ArrayList<>();
         List<Vehicle> vehicles = dataSource.vehicles(s.agencyId(), forceRefresh, warnings);
         warnings.forEach(log::warn);
-        return live.analyze(s.graph(), vehicles);
+        return new LiveAnalysis(choice.create()).analyze(s.graph(), vehicles);
     }
 
     /** Rulează benchmark-ul; rețeaua reală se include dacă e încărcată. Rezultatul se exportă în CSV. */
@@ -144,13 +144,13 @@ public class NetworkService {
         return lastBenchmark;
     }
 
-    /** Exportă în CSV tot ce e disponibil; întoarce fișierele scrise. */
-    public List<Path> exportAll() {
-        NetworkSnapshot s = snapshot();
+    /** Exportă în CSV tot ce e disponibil, cu algoritmul ales; întoarce fișierele scrise. */
+    public List<Path> exportAll(SccChoice choice) {
+        NetworkSnapshot.AlgorithmView v = view(choice);
         List<Path> files = new ArrayList<>();
-        files.add(exporter.smallComponents(s.state()));
-        files.add(exporter.criticalRoutes(s.criticalRoutes()));
-        files.add(exporter.bridges(s.bridges()));
+        files.add(exporter.smallComponents(v.state()));
+        files.add(exporter.criticalRoutes(v.criticalRoutes()));
+        files.add(exporter.bridges(v.bridges()));
         if (lastBenchmark != null) {
             files.add(exporter.benchmark(lastBenchmark));
         }

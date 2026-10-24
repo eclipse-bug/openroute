@@ -19,9 +19,17 @@ public final class ApiDtos {
     public record Source(String endpoint, int records, String origin, Instant fetchedAt) {
     }
 
-    public record Summary(String agencyId, Instant loadedAt, int stops, int edges, double averageDegree,
-                          int routes, int activeRoutes, int sccCount, int largestSccSize, double largestSccPercent,
-                          int smallComponentCount, int unservedStops, double tarjanMillis,
+    /** Un algoritm SCC selectabil. */
+    public record AlgorithmDto(String id, String label, String description) {
+    }
+
+    /** Cum a rulat algoritmul ales pe graful analizat. */
+    public record AlgorithmRun(String id, String label, double millis, long operations) {
+    }
+
+    public record Summary(String agencyId, Instant loadedAt, AlgorithmRun algorithm, int stops, int edges,
+                          double averageDegree, int routes, int activeRoutes, int sccCount, int largestSccSize,
+                          double largestSccPercent, int smallComponentCount, int unservedStops,
                           List<StopInfo> smallComponentStops) {
     }
 
@@ -35,15 +43,15 @@ public final class ApiDtos {
     public record RouteDto(String id, String label, String longName, String type, int edges) {
     }
 
-    public record CloseRequest(List<String> routeIds, Boolean liveOnly) {
+    public record CloseRequest(List<String> routeIds, Boolean liveOnly, String algorithm) {
     }
 
-    public record ClosureDto(List<ClosureAnalysis.RouteRef> closedRoutes, List<String> unknownRoutes,
-                             boolean liveOnly, ClosureAnalysis.Summary before, ClosureAnalysis.Summary after,
-                             int detachedCount, List<StopInfo> detachedStops) {
+    public record ClosureDto(AlgorithmRun algorithm, List<ClosureAnalysis.RouteRef> closedRoutes,
+                             List<String> unknownRoutes, boolean liveOnly, ClosureAnalysis.Summary before,
+                             ClosureAnalysis.Summary after, int detachedCount, List<StopInfo> detachedStops) {
     }
 
-    public record LiveDto(int vehicles, int vehiclesOnRoutes, List<String> activeRouteIds,
+    public record LiveDto(AlgorithmRun algorithm, int vehicles, int vehiclesOnRoutes, List<String> activeRouteIds,
                           List<String> activeRouteLabels, int inactiveStops, int stops, int edges, int sccCount,
                           int largestSccSize, double largestSccPercent, List<StopInfo> smallComponentStops,
                           List<StopDto> stopComponents) {

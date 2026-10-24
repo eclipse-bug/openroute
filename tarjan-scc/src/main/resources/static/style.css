@@ -36,7 +36,23 @@ header {
 
 h1 { font-size: 17px; margin: 0; }
 .status { color: var(--muted); font-size: 13px; }
-.actions { display: flex; gap: 12px; align-items: center; }
+
+.algo-picker { display: inline-flex; align-items: center; gap: 0; }
+.algo-picker .muted { margin-right: 6px; }
+.algo-picker button {
+  background: #fff;
+  color: var(--accent);
+  border-radius: 0;
+  margin-left: -1px;
+  padding: 6px 11px;
+}
+.algo-picker button:nth-of-type(1) { border-radius: 6px 0 0 6px; }
+.algo-picker button:last-child { border-radius: 0 6px 6px 0; }
+.algo-picker button.active { background: var(--accent); color: #fff; }
+.algo-badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #dbeafe; color: #1e40af; }
+td.ok { color: #16a34a; font-weight: 600; }
+td.bad { color: var(--detached); font-weight: 600; }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 
 .banner {
   padding: 10px 16px;

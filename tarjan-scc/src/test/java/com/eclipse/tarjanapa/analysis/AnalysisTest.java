@@ -1,5 +1,6 @@
 package com.eclipse.tarjanapa.analysis;
 
+import com.eclipse.tarjanapa.algorithms.SccChoice;
 import com.eclipse.tarjanapa.algorithms.SccResult;
 import com.eclipse.tarjanapa.algorithms.TarjanIterative;
 import com.eclipse.tarjanapa.graph.GraphBuilder;
@@ -9,6 +10,8 @@ import com.eclipse.tarjanapa.model.Vehicle;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -29,6 +32,24 @@ class AnalysisTest {
     static void setUp() throws IOException {
         g = GraphBuilder.build(GraphBuilderTest.loadFixture()).graph();
         scc = new TarjanIterative().run(g.intGraph());
+    }
+
+    @ParameterizedTest
+    @EnumSource(SccChoice.class)
+    void ceiTreiAlgoritmiDauAceleasiAnalize(SccChoice choice) {
+        SccResult r = choice.create().run(g.intGraph());
+        assertTrue(scc.samePartitionAs(r));
+        NetworkState st = NetworkState.of(g, r);
+        assertEquals(2, st.sccCount());
+        assertEquals(5, st.largestSize());
+
+        ClosureAnalysis.ClosureResult closed = new ClosureAnalysis(choice.create()).simulate(g, r, Set.of("2"));
+        assertEquals(Set.of("D", "E"), Set.copyOf(closed.detachedStops().stream().map(StopInfo::id).toList()));
+
+        List<CriticalRoutesAnalysis.RouteImpact> ranking =
+                new CriticalRoutesAnalysis(new ClosureAnalysis(choice.create())).rank(g, r);
+        assertEquals(List.of(2, 2, 0), ranking.stream().map(CriticalRoutesAnalysis.RouteImpact::lostStops).toList());
+        assertEquals(1, StructureAnalysis.condensation(g, r).minEdgesToAdd());
     }
 
     @Test
@@ -104,12 +125,12 @@ class AnalysisTest {
     void benchmarkVerificaAcordulSiExportaCsv(@TempDir Path dir) throws IOException {
         Benchmark.Config config = new Benchmark.Config(List.of(100, 1_000), 2.0, 42L, 2, 1, 1_000);
         Benchmark.Result r = new Benchmark().run(config, g.intGraph());
-        assertEquals(3 * 4, r.rows().size(), "3 grafuri × 4 algoritmi");
+        assertEquals(3 * 5, r.rows().size(), "3 grafuri × 5 algoritmi");
         assertTrue(r.verified());
 
         Path csv = new CsvExporter(dir).benchmark(r);
         List<String> lines = Files.readAllLines(csv);
-        assertEquals(13, lines.size());
+        assertEquals(16, lines.size());
         assertTrue(lines.get(1).startsWith("retea-reala,6,9,TarjanRecursive"));
         assertTrue(Files.exists(dir.resolve("benchmark-latest.csv")));
     }
@@ -118,7 +139,7 @@ class AnalysisTest {
     void naiveSccSeOmitePesteLimita() {
         Benchmark.Config config = new Benchmark.Config(List.of(2_000), 2.0, 1L, 1, 0, 1_000);
         Benchmark.Result r = new Benchmark().run(config, null);
-        assertEquals(3, r.rows().size());
+        assertEquals(4, r.rows().size());
         assertTrue(r.rows().stream().noneMatch(row -> row.algorithm().equals("NaiveScc")));
     }
 }

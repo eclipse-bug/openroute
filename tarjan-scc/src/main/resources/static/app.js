@@ -12,7 +12,14 @@ const state = {
   live: null,           // /api/analysis/live (când toggle-ul e activ)
   bridges: null,
   chart: null,
+  algorithm: 'tarjan',  // tarjan | kosaraju | gabow
+  algorithms: [],       // /api/algorithms
 };
+
+const ALGO_LABELS = { tarjan: 'Tarjan', kosaraju: 'Kosaraju', gabow: 'Gabow' };
+const algoLabel = (id) => ALGO_LABELS[id] || id;
+/** Parametrul de URL cu algoritmul ales. */
+const algoQuery = () => `algorithm=${encodeURIComponent(state.algorithm)}`;
 
 const COLORS = {
   giant: '#64748b',
@@ -172,7 +179,9 @@ function renderSummary(s) {
     ${live ? `<div><span class="badge live">live</span> ${fmt(live.vehicles)} vehicule, ${fmt(live.activeRouteIds.length)} rute active</div>` : ''}
     <div>V = <b>${fmt(cur.stops)}</b> stații · E = <b>${fmt(cur.edges)}</b> arce · ${fmt(s.activeRoutes)} rute</div>
     <div>SCC: <b>${fmt(cur.scc)}</b> · cea mai mare: <b>${fmt(cur.big)}</b> (${fmt(cur.pct, 1)}%)</div>
-    <div class="muted">Tarjan: ${fmt(s.tarjanMillis, 2)} ms · operator ${esc(s.agencyId)}</div>`;
+    <div><span class="algo-badge">${esc(s.algorithm.label)}</span>
+      ${fmt(s.algorithm.millis, 3)} ms · ${fmt(s.algorithm.operations)} operații</div>
+    <div class="muted">operator ${esc(s.agencyId)}</div>`;
 }
 
 // ------------------------------------------------------------ simulare
@@ -213,13 +222,15 @@ async function simulate() {
   try {
     const r = await api('/api/simulate/close', {
       method: 'POST',
-      body: JSON.stringify({ routeIds: [...state.closed], liveOnly: !!state.live }),
+      body: JSON.stringify({ routeIds: [...state.closed], liveOnly: !!state.live, algorithm: state.algorithm }),
     });
     state.detached = new Set(r.detachedStops.map((s) => s.id));
     redraw();
     $('simResult').innerHTML = `
       <div class="result">
         <h3>Rute închise: ${esc(r.closedRoutes.map((x) => x.label).join(', ') || '—')}${r.liveOnly ? ' <span class="badge live">rețea live</span>' : ''}</h3>
+        <div class="muted">Recalculat cu <span class="algo-badge">${esc(r.algorithm.label)}</span>
+             în ${fmt(r.algorithm.millis, 3)} ms (${fmt(r.algorithm.operations)} operații)</div>
         <div><span class="big ${r.detachedCount ? '' : 'ok'}">${fmt(r.detachedCount)}</span> stații desprinse din componenta mare</div>
         <div>SCC: ${fmt(r.before.sccCount)} → <b>${fmt(r.after.sccCount)}</b> ·
              cea mai mare SCC: ${fmt(r.before.largestSize)} → <b>${fmt(r.after.largestSize)}</b>
@@ -264,8 +275,8 @@ async function loadCritical() {
   if (criticalLoaded) return;
   criticalLoaded = true;
   try {
-    const rows = await api('/api/analysis/critical-routes?limit=50');
-    $('criticalTable').innerHTML = `<table>
+    const rows = await api('/api/analysis/critical-routes?limit=50&' + algoQuery());
+    $('criticalTable').innerHTML = `<p class="muted">Calculat cu <span class="algo-badge">${esc(algoLabel(state.algorithm))}</span></p><table>
       <thead><tr><th>#</th><th>Ruta</th><th>Tip</th><th class="num">Stații pierdute</th><th class="num">SCC după</th><th></th></tr></thead>
       <tbody>${rows.map((x) => `<tr>
         <td>${x.rank}</td>
@@ -298,11 +309,13 @@ async function loadStructure() {
   if (structureLoaded) return;
   structureLoaded = true;
   try {
-    const [b, c] = await Promise.all([api('/api/analysis/bridges'), api('/api/analysis/condensation')]);
+    const [b, c] = await Promise.all([
+      api('/api/analysis/bridges?' + algoQuery()), api('/api/analysis/condensation?' + algoQuery()),
+    ]);
     state.bridges = b;
     drawBridges();
     $('structureInfo').innerHTML = `
-      <h4>Graful condensat (DAG de SCC-uri)</h4>
+      <h4>Graful condensat (DAG de SCC-uri) <span class="algo-badge">${esc(algoLabel(state.algorithm))}</span></h4>
       <table>
         <tr><td>Componente</td><td class="num">${fmt(c.componentCount)}</td></tr>
         <tr><td>Arce între componente</td><td class="num">${fmt(c.dagEdges)}</td></tr>
@@ -395,7 +408,7 @@ $('liveToggle').addEventListener('change', async (ev) => {
     state.live = null;
   } else {
     try {
-      const live = await api('/api/analysis/live');
+      const live = await api('/api/analysis/live?' + algoQuery());
       live.componentById = new Map(live.stopComponents.map((s) => [s.id, s]));
       state.live = live;
       if (live.vehicles === 0) showBanner('Tranzy nu raportează niciun vehicul în circulație acum.', false);
@@ -408,6 +421,76 @@ $('liveToggle').addEventListener('change', async (ev) => {
   redraw();
   renderSummary(state.summary);
 });
+
+// ------------------------------------------------------------ algoritm
+
+/** Componentele și analizele care depind de algoritmul ales. */
+async function loadAlgorithmData() {
+  const [summary, stops] = await Promise.all([
+    api('/api/network/summary?' + algoQuery()), api('/api/network/stops?' + algoQuery()),
+  ]);
+  state.summary = summary;
+  state.stops = stops;
+  state.stopById = new Map(stops.map((s) => [s.id, s]));
+  criticalLoaded = false;
+  structureLoaded = false;
+  if (state.live) {
+    const live = await api('/api/analysis/live?' + algoQuery());
+    live.componentById = new Map(live.stopComponents.map((s) => [s.id, s]));
+    state.live = live;
+  }
+}
+
+async function selectAlgorithm(id) {
+  if (id === state.algorithm) return;
+  state.algorithm = id;
+  try { localStorage.setItem('scc-algorithm', id); } catch (_) { /* fără stocare locală */ }
+  document.querySelectorAll('#algoPicker button').forEach((b) => b.classList.toggle('active', b.dataset.algo === id));
+  try {
+    await loadAlgorithmData();
+    state.detached.clear();
+    $('simResult').innerHTML = '';
+    renderSummary(state.summary);
+    redraw();
+    const active = document.querySelector('.tabs button.active').dataset.tab;
+    if (active !== 'simulate') switchTab(active);
+    if (state.closed.size) await simulate();   // reface simularea cu noul algoritm
+  } catch (e) {
+    showBanner('Eroare la schimbarea algoritmului: ' + e.message, true);
+  }
+}
+
+document.querySelectorAll('#algoPicker button').forEach((b) =>
+  b.addEventListener('click', () => selectAlgorithm(b.dataset.algo)));
+
+/** Rulează cei trei algoritmi pe rețeaua reală și compară rezultatele. */
+async function compareAlgorithms() {
+  const btn = $('compareBtn');
+  btn.disabled = true;
+  try {
+    const ids = state.algorithms.length ? state.algorithms.map((a) => a.id) : Object.keys(ALGO_LABELS);
+    const results = await Promise.all(ids.map((id) => api('/api/network/summary?algorithm=' + id)));
+    const ref = results[0];
+    $('compareTable').innerHTML = `<table>
+      <thead><tr><th>Algoritm</th><th class="num">SCC</th><th class="num">SCC maximă</th>
+        <th class="num">Timp (ms)</th><th class="num">Operații</th><th>Acord</th></tr></thead>
+      <tbody>${results.map((r) => {
+        const same = r.sccCount === ref.sccCount && r.largestSccSize === ref.largestSccSize;
+        const desc = (state.algorithms.find((a) => a.id === r.algorithm.id) || {}).description || '';
+        return `<tr><td title="${esc(desc)}"><b>${esc(r.algorithm.label)}</b></td>
+          <td class="num">${fmt(r.sccCount)}</td><td class="num">${fmt(r.largestSccSize)}</td>
+          <td class="num">${fmt(r.algorithm.millis, 3)}</td><td class="num">${fmt(r.algorithm.operations)}</td>
+          <td class="${same ? 'ok' : 'bad'}">${same ? '✓' : '✗'}</td></tr>`;
+      }).join('')}</tbody></table>
+      <p class="hint">Timpul e al primei rulări (fără warm-up); pentru medii folosiți benchmark-ul de mai jos.</p>`;
+  } catch (e) {
+    $('compareTable').textContent = 'Eroare: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('compareBtn').addEventListener('click', compareAlgorithms);
 
 // ---------------------------------------------------------------- tab-uri
 
@@ -461,16 +544,18 @@ async function loadAll() {
   }
   if (status.warnings.length) showBanner(summarizeWarnings(status.warnings), false);
 
-  const [summary, stops, edges, routes] = await Promise.all([
-    api('/api/network/summary'), api('/api/network/stops'), api('/api/network/edges'), api('/api/routes'),
+  const [edges, routes, algorithms] = await Promise.all([
+    api('/api/network/edges'), api('/api/routes'), api('/api/algorithms'), loadAlgorithmData(),
   ]);
-  state.summary = summary;
-  state.stops = stops;
-  state.stopById = new Map(stops.map((s) => [s.id, s]));
+  const summary = state.summary;
+  const stops = state.stops;
   state.edges = edges;
   state.routes = routes;
-  criticalLoaded = false;
-  structureLoaded = false;
+  state.algorithms = algorithms;
+  for (const a of algorithms) {
+    const b = document.querySelector(`#algoPicker button[data-algo="${a.id}"]`);
+    if (b) b.title = a.description;
+  }
 
   const origins = [...new Set(status.sources.map((s) => s.origin))].join(', ');
   $('status').textContent = `Operator ${status.agencyId} · încărcat ${new Date(status.loadedAt).toLocaleString('ro-RO')} · sursă: ${origins}`;
@@ -498,5 +583,12 @@ $('refreshBtn').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+
+try {
+  const saved = localStorage.getItem('scc-algorithm');
+  if (saved && ALGO_LABELS[saved]) state.algorithm = saved;
+} catch (_) { /* fără stocare locală */ }
+document.querySelectorAll('#algoPicker button')
+  .forEach((b) => b.classList.toggle('active', b.dataset.algo === state.algorithm));
 
 loadAll().catch((e) => showBanner('Eroare la încărcare: ' + e.message, true));

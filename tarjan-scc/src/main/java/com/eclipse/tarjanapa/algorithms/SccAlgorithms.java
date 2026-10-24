@@ -13,9 +13,12 @@ public final class SccAlgorithms {
     private SccAlgorithms() {
     }
 
-    /** Cei patru algoritmi comparați în benchmark, în ordinea din raport. */
+    /**
+     * Algoritmii comparați în benchmark, în ordinea din raport: cei trei
+     * selectabili (Tarjan în ambele variante, Kosaraju, Gabow) plus referința naivă.
+     */
     public static List<SccAlgorithm> all() {
-        return List.of(new TarjanRecursive(), new TarjanIterative(), new Kosaraju(), new NaiveScc());
+        return List.of(new TarjanRecursive(), new TarjanIterative(), new Kosaraju(), new Gabow(), new NaiveScc());
     }
 
     /**

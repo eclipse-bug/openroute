@@ -60,4 +60,14 @@ class DeepGraphTest {
     void kosarajuIterativMergeSiElPeLant() {
         assertEquals(N, new Kosaraju().run(chain(N)).count());
     }
+
+    @Test
+    void gabowIterativMergePeLantSiPeCiclu() {
+        assertEquals(N, new Gabow().run(chain(N)).count());
+        IntGraph.Builder b = IntGraph.builder(N);
+        for (int i = 0; i < N; i++) {
+            b.addEdge(i, (i + 1) % N);
+        }
+        assertEquals(1, new Gabow().run(b.build()).count());
+    }
 }

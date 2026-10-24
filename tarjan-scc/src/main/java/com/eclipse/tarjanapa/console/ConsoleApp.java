@@ -1,6 +1,7 @@
 package com.eclipse.tarjanapa.console;
 
 import com.eclipse.tarjanapa.TarjanApaApplication;
+import com.eclipse.tarjanapa.algorithms.SccChoice;
 import com.eclipse.tarjanapa.analysis.Benchmark;
 import com.eclipse.tarjanapa.analysis.ClosureAnalysis;
 import com.eclipse.tarjanapa.analysis.CriticalRoutesAnalysis;
@@ -33,7 +34,8 @@ import java.util.Set;
  * Modul consolă, cu meniu text — util pentru capturile din raport.
  * <p>
  * Pornește contextul Spring fără server web (aceeași configurație ca serverul)
- * și folosește direct {@link NetworkService}.
+ * și folosește direct {@link NetworkService}. Toate analizele rulează cu
+ * algoritmul SCC ales din meniu: Tarjan (implicit), Kosaraju sau Gabow.
  * <pre>
  * ./mvnw spring-boot:run -Dspring-boot.run.main-class=com.eclipse.tarjanapa.console.ConsoleApp
  * </pre>
@@ -43,6 +45,7 @@ public final class ConsoleApp {
     private final NetworkService service;
     private final BufferedReader in;
     private final PrintStream out;
+    private SccChoice algorithm = SccChoice.TARJAN;
 
     private ConsoleApp(NetworkService service) {
         this.service = service;
@@ -64,11 +67,12 @@ public final class ConsoleApp {
     }
 
     private void loop() throws IOException {
-        out.println("=== Analiza conectivității transportului public — Tarjan SCC ===");
+        out.println("=== Analiza conectivității transportului public — SCC (Tarjan / Kosaraju / Gabow) ===");
         while (true) {
             out.println();
             out.println("Operator: " + (service.agencyId() == null ? "(nesetat)" : service.agencyId())
-                    + (service.isLoaded() ? "   date încărcate" : "   date neîncărcate"));
+                    + (service.isLoaded() ? "   date încărcate" : "   date neîncărcate")
+                    + "   algoritm: " + algorithm.label());
             out.println(" 1. Încarcă date (din cache sau Tranzy)");
             out.println(" 2. Sumar rețea");
             out.println(" 3. Închide rută(e)");
@@ -78,13 +82,15 @@ public final class ConsoleApp {
             out.println(" 7. Benchmark");
             out.println(" 8. Export CSV");
             out.println(" 9. Reîncarcă forțat din Tranzy");
+            out.println(" A. Alege algoritmul SCC (Tarjan / Kosaraju / Gabow)");
+            out.println(" C. Compară cei 3 algoritmi pe rețeaua reală");
             out.println(" 0. Ieșire");
             String choice = ask("Opțiune");
             if (choice == null || choice.equals("0")) {
                 return;
             }
             try {
-                switch (choice) {
+                switch (choice.trim().toUpperCase(Locale.ROOT)) {
                     case "1" -> load(false);
                     case "2" -> summary();
                     case "3" -> closeRoutes();
@@ -94,6 +100,8 @@ public final class ConsoleApp {
                     case "7" -> benchmark();
                     case "8" -> exportCsv();
                     case "9" -> load(true);
+                    case "A" -> chooseAlgorithm();
+                    case "C" -> compareAlgorithms();
                     default -> out.println("Opțiune necunoscută.");
                 }
             } catch (TranzyException | NoDataException | IllegalArgumentException | IllegalStateException e) {
@@ -116,16 +124,52 @@ public final class ConsoleApp {
             service.setAgencyId(id);
         }
         NetworkSnapshot s = service.load(force);
-        out.printf("Încărcat: %d stații, %d arce, %d rute.%n", s.state().stops(), s.state().edges(),
+        out.printf("Încărcat: %d stații, %d arce, %d rute.%n", s.graph().stopCount(), s.graph().edgeCount(),
                 s.graph().routes().size());
         s.sources().forEach(l -> out.printf("  /%-11s %6d înregistrări  (%s, %s)%n",
                 l.endpoint(), l.records().size(), l.origin(), l.fetchedAt()));
         s.warnings().forEach(w -> out.println("  Avertisment: " + w));
     }
 
+    private void chooseAlgorithm() throws IOException {
+        SccChoice[] all = SccChoice.values();
+        for (int i = 0; i < all.length; i++) {
+            out.printf(" %d. %-9s %s%n", i + 1, all[i].label(), all[i].description());
+        }
+        String a = ask("Algoritm [" + algorithm.label() + "]");
+        if (a == null || a.isBlank()) {
+            return;
+        }
+        a = a.trim();
+        algorithm = a.matches("[1-9]") && Integer.parseInt(a) <= all.length
+                ? all[Integer.parseInt(a) - 1] : SccChoice.parse(a);
+        out.println("Algoritm ales: " + algorithm.label());
+    }
+
+    /** Rulează cei trei algoritmi pe rețeaua încărcată și verifică faptul că dau aceleași componente. */
+    private void compareAlgorithms() {
+        NetworkSnapshot s = service.snapshot();
+        out.printf("%-10s %8s %12s %12s %10s%n", "Algoritm", "SCC", "SCC maximă", "Timp (ms)", "Operații");
+        NetworkSnapshot.AlgorithmView first = null;
+        for (SccChoice c : SccChoice.values()) {
+            NetworkSnapshot.AlgorithmView v = s.view(c);
+            out.printf(Locale.ROOT, "%-10s %8d %12d %12.3f %10d%n", c.label(), v.scc().count(), v.scc().largestSize(),
+                    v.scc().elapsedMillis(), v.scc().operations());
+            if (first == null) {
+                first = v;
+            } else if (!first.scc().samePartitionAs(v.scc())) {
+                out.println("ATENȚIE: " + c.label() + " a găsit alte componente decât " + first.choice().label() + "!");
+                return;
+            }
+        }
+        out.println("Toți trei au găsit exact aceleași componente tare conexe.");
+        out.println("(Timpul e măsurat la prima rulare; pentru medii cu warm-up folosiți opțiunea 7, Benchmark.)");
+    }
+
     private void summary() {
         NetworkSnapshot s = service.snapshot();
-        NetworkState st = s.state();
+        NetworkSnapshot.AlgorithmView v = s.view(algorithm);
+        NetworkState st = v.state();
         out.println("--- Sumar rețea ---");
         out.printf("Stații (V):                 %d%n", st.stops());
         out.printf("Arce (E):                   %d%n", st.edges());
@@ -133,7 +177,8 @@ public final class ConsoleApp {
         out.printf("Rute (cu arce / total):     %d / %d%n", st.activeRoutes(), s.graph().routes().size());
         out.printf("Componente tare conexe:     %d%n", st.sccCount());
         out.printf("Cea mai mare SCC:           %d stații (%.1f%%)%n", st.largestSize(), st.largestPercent());
-        out.printf("Timp Tarjan (iterativ):     %.3f ms, %d operații%n", s.scc().elapsedMillis(), s.scc().operations());
+        out.printf("Timp %-22s %.3f ms, %d operații%n", algorithm.label() + ":", v.scc().elapsedMillis(),
+                v.scc().operations());
         out.printf("Stații nedeservite (excluse): %d%n", s.buildReport().unservedStops());
         if (!st.smallComponentStops().isEmpty()) {
             out.println("Stații în afara SCC mari:");
@@ -153,7 +198,8 @@ public final class ConsoleApp {
                 ids.add(resolveRoute(g, token.trim()));
             }
         }
-        ClosureAnalysis.ClosureResult r = service.simulateClosure(ids);
+        ClosureAnalysis.ClosureResult r = service.simulateClosure(ids, algorithm);
+        out.printf("Recalculat cu %s în %.3f ms%n", algorithm.label(), r.sccAfter().elapsedMillis());
         out.println("Rute închise: " + r.closedRoutes().stream().map(ClosureAnalysis.RouteRef::label).toList());
         if (!r.unknownRoutes().isEmpty()) {
             out.println("Rute necunoscute: " + r.unknownRoutes());
@@ -180,7 +226,8 @@ public final class ConsoleApp {
     private void criticalRoutes() throws IOException {
         String l = ask("Câte rute afișez [20]");
         int limit = l == null || l.isBlank() ? 20 : Integer.parseInt(l.trim());
-        List<CriticalRoutesAnalysis.RouteImpact> all = service.snapshot().criticalRoutes();
+        List<CriticalRoutesAnalysis.RouteImpact> all = service.view(algorithm).criticalRoutes();
+        out.println("Rute critice calculate cu " + algorithm.label() + ":");
         out.printf("%-4s %-8s %-10s %8s %8s %10s  %s%n", "Loc", "Ruta", "Tip", "Pierdute", "SCC", "SCC max", "Denumire");
         for (CriticalRoutesAnalysis.RouteImpact x : all.subList(0, Math.min(limit, all.size()))) {
             out.printf("%-4d %-8s %-10s %8d %8d %10d  %s%n", x.rank(), x.label(), x.type(), x.lostStops(),
@@ -189,7 +236,7 @@ public final class ConsoleApp {
     }
 
     private void bridges() {
-        StructureAnalysis.BridgeReport r = service.snapshot().bridges();
+        StructureAnalysis.BridgeReport r = service.view(algorithm).bridges();
         out.printf("Punți (segmente fără alternativă): %d%n", r.bridgeCount());
         r.bridges().stream().limit(40).forEach(b ->
                 out.printf("  %s — %s   [%s]%n", b.fromName(), b.toName(), String.join(", ", b.routes())));
@@ -201,7 +248,8 @@ public final class ConsoleApp {
     }
 
     private void condensation() {
-        StructureAnalysis.CondensationReport c = service.snapshot().condensation();
+        StructureAnalysis.CondensationReport c = service.view(algorithm).condensation();
+        out.println("Componente calculate cu " + algorithm.label() + ":");
         out.printf("Componente (noduri în DAG): %d%n", c.componentCount());
         out.printf("Arce în DAG:                %d%n", c.dagEdges());
         out.printf("Surse / destinații:         %d / %d (izolate: %d)%n", c.sources(), c.sinks(), c.isolated());
@@ -230,7 +278,7 @@ public final class ConsoleApp {
     }
 
     private void exportCsv() {
-        List<Path> files = service.exportAll();
+        List<Path> files = service.exportAll(algorithm);
         out.println("Fișiere scrise:");
         files.forEach(f -> out.println("  " + f.toAbsolutePath()));
     }
