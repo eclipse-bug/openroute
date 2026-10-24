@@ -71,6 +71,7 @@ const edgeLayer = L.layerGroup().addTo(map);
 const arrowLayer = L.layerGroup();
 const bridgeLayer = L.layerGroup();
 const stopLayer = L.layerGroup().addTo(map);
+const connLayer = L.layerGroup().addTo(map);
 const ARROW_MIN_ZOOM = 15;
 
 map.on('zoomend', () => {
@@ -149,7 +150,11 @@ function stopPopup(s) {
     : 'fără rute active acum';
   return `<b>${esc(s.name)}</b><br><span class="muted">id ${esc(s.id)}</span><br>${sccLine}`
     + `<br>Rute: ${esc(s.routes.join(', ') || '—')}`
-    + (state.detached.has(s.id) ? '<br><b style="color:#dc2626">desprinsă după simulare</b>' : '');
+    + (state.detached.has(s.id) ? '<br><b style="color:#dc2626">desprinsă după simulare</b>' : '')
+    + `<div class="popup-actions">
+         <button data-conn-from="${esc(s.id)}">De aici</button>
+         <button data-conn-to="${esc(s.id)}" class="secondary">Până aici</button>
+       </div>`;
 }
 
 function drawBridges() {
@@ -455,6 +460,7 @@ async function selectAlgorithm(id) {
     const active = document.querySelector('.tabs button.active').dataset.tab;
     if (active !== 'simulate') switchTab(active);
     if (state.closed.size) await simulate();   // reface simularea cu noul algoritm
+    if ($('connResult').innerHTML) await findConnection();
   } catch (e) {
     showBanner('Eroare la schimbarea algoritmului: ' + e.message, true);
   }
@@ -491,6 +497,135 @@ async function compareAlgorithms() {
 }
 
 $('compareBtn').addEventListener('click', compareAlgorithms);
+
+// ------------------------------------------------------------ conexiune
+
+/** Textul afișat în căutare pentru o stație: „nume · id” (numele se pot repeta). */
+const stopOptionText = (s) => `${s.name} · ${s.id}`;
+
+function fillStopOptions() {
+  const sorted = [...state.stops].sort((a, b) => a.name.localeCompare(b.name, 'ro'));
+  $('stopOptions').innerHTML = sorted.map((s) => `<option value="${esc(stopOptionText(s))}"></option>`).join('');
+}
+
+/** Id-ul stației din câmpul de căutare: „nume · id”, id simplu sau un nume unic. */
+function stopIdFromInput(value) {
+  const v = value.trim();
+  if (!v) return null;
+  const sep = v.lastIndexOf(' · ');
+  if (sep >= 0 && state.stopById.has(v.slice(sep + 3))) return v.slice(sep + 3);
+  if (state.stopById.has(v)) return v;
+  const fold = (x) => x.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const matches = state.stops.filter((s) => fold(s.name) === fold(v));
+  return matches.length ? matches[0].id : null;
+}
+
+function setConnStop(which, id) {
+  const s = state.stopById.get(id);
+  if (!s) return;
+  $(which === 'from' ? 'connFrom' : 'connTo').value = stopOptionText(s);
+  map.closePopup();
+  switchTab('connect');
+  if ($('connFrom').value && $('connTo').value) findConnection();
+}
+
+document.addEventListener('click', (ev) => {
+  const d = ev.target.dataset || {};
+  if (d.connFrom) setConnStop('from', d.connFrom);
+  if (d.connTo) setConnStop('to', d.connTo);
+});
+
+function drawConnection(c) {
+  connLayer.clearLayers();
+  const line = (path, style) => {
+    if (!path.found || path.stops.length < 2) return;
+    L.polyline(path.stops.map((s) => [s.lat, s.lon]), { renderer, ...style }).addTo(connLayer);
+  };
+  line(c.backward, { color: '#16a34a', weight: 4, opacity: 0.8, dashArray: '6 6' });
+  line(c.forward, { color: '#2563eb', weight: 5, opacity: 0.9 });
+  const mark = (s, label, color) => L.circleMarker([s.lat, s.lon], {
+    renderer, radius: 9, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1,
+  }).bindTooltip(`${label}: ${esc(s.name)}`, { permanent: true, direction: 'top' }).addTo(connLayer);
+  mark(c.from, 'A', '#2563eb');
+  mark(c.to, 'B', '#16a34a');
+  const pts = [...c.forward.stops, ...c.backward.stops, c.from, c.to].map((s) => [s.lat, s.lon]);
+  map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 16 });
+}
+
+function renderPath(title, path) {
+  if (!path.found) return `<h4>${title}</h4><p class="muted">Nu există drum.</p>`;
+  if (!path.legs.length) return `<h4>${title}</h4><p class="muted">Aceeași stație.</p>`;
+  return `<h4>${title}: ${fmt(path.segments)} segmente · ${fmt(path.transfers)} schimbări de rută</h4>
+    ${path.legs.map((l) => {
+      const first = l.stops[0];
+      const last = l.stops[l.stops.length - 1];
+      const middle = l.stops.slice(1, -1);
+      return `<div class="leg"><span class="route-tag" title="${esc(l.routeType)}">${esc(l.routeLabel)}</span>
+        <div><button class="link" data-stop="${esc(first.id)}">${esc(first.name)}</button> →
+          <button class="link" data-stop="${esc(last.id)}">${esc(last.name)}</button>
+          <span class="muted">(${esc(l.routeType)}, ${fmt(l.segments)} ${l.segments === 1 ? 'stație' : 'stații'})</span>
+          ${middle.length ? `<details><summary class="muted">stații intermediare</summary>
+            <ol>${middle.map((s) => `<li>${esc(s.name)}</li>`).join('')}</ol></details>` : ''}
+        </div></div>`;
+    }).join('')}`;
+}
+
+async function findConnection() {
+  const from = stopIdFromInput($('connFrom').value);
+  const to = stopIdFromInput($('connTo').value);
+  if (!from || !to) {
+    $('connResult').innerHTML = `<div class="result">Alegeți ${!from ? 'stația de plecare' : 'stația de sosire'} din listă.</div>`;
+    return;
+  }
+  const mode = document.querySelector('input[name="connMode"]:checked').value;
+  const params = new URLSearchParams({ from, to, algorithm: state.algorithm, mode });
+  if ($('connUseClosed').checked && state.closed.size) params.set('closed', [...state.closed].join(','));
+  const btn = $('connectBtn');
+  btn.disabled = true;
+  try {
+    const c = await api('/api/connection?' + params);
+    const pill = (ok, text) => `<span class="pill ${ok ? 'yes' : 'no'}">${text}: ${ok ? 'da' : 'nu'}</span>`;
+    $('connResult').innerHTML = `<div class="result">
+      <div class="verdict">
+        ${pill(c.forward.found, 'A → B')}
+        ${pill(c.backward.found, 'B → A')}
+        ${pill(c.sameComponent, 'aceeași SCC')}
+      </div>
+      <p>${esc(c.explanation)}</p>
+      <p class="muted">SCC #${c.fromComponent} și SCC #${c.toComponent}, calculate cu
+        <span class="algo-badge">${esc(algoLabel(state.algorithm))}</span>
+        · criteriu: ${mode === 'stops' ? 'cele mai puține stații (BFS)' : 'cele mai puține schimbări (Dijkstra)'}${params.has('closed')
+          ? ` · fără rutele închise (${state.closed.size})` : ''}</p>
+      ${renderPath('Dus (A → B)', c.forward)}
+      ${renderPath('Întors (B → A)', c.backward)}
+    </div>`;
+    drawConnection(c);
+  } catch (e) {
+    $('connResult').innerHTML = `<div class="result">Eroare: ${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('connectBtn').addEventListener('click', findConnection);
+$('connClearBtn').addEventListener('click', () => {
+  $('connFrom').value = '';
+  $('connTo').value = '';
+  $('connResult').innerHTML = '';
+  connLayer.clearLayers();
+});
+$('swapBtn').addEventListener('click', () => {
+  const a = $('connFrom').value;
+  $('connFrom').value = $('connTo').value;
+  $('connTo').value = a;
+  if (a && $('connFrom').value) findConnection();
+});
+document.querySelectorAll('input[name="connMode"]').forEach((r) => r.addEventListener('change', () => {
+  if ($('connResult').innerHTML) findConnection();
+}));
+['connFrom', 'connTo'].forEach((id) => $(id).addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') findConnection();
+}));
 
 // ---------------------------------------------------------------- tab-uri
 
@@ -552,6 +687,7 @@ async function loadAll() {
   state.edges = edges;
   state.routes = routes;
   state.algorithms = algorithms;
+  fillStopOptions();
   for (const a of algorithms) {
     const b = document.querySelector(`#algoPicker button[data-algo="${a.id}"]`);
     if (b) b.title = a.description;

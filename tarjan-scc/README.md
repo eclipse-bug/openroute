@@ -49,6 +49,29 @@ Datele se salvează în `data/cache/{agencyId}/{endpoint}.json`. Cât timp cache
 cache-ul existent, chiar dacă e mai vechi, deci **aplicația merge offline la prezentare**. Butonul
 „Reîncarcă datele” (sau `POST /api/data/refresh`) forțează o descărcare nouă.
 
+## Conexiunea dintre două stații
+
+Tab-ul **Conexiune** (sau opțiunea `D` din consolă, ori `GET /api/connection`) răspunde la
+întrebarea „pot ajunge din A în B și înapoi?”:
+
+* **A și B în aceeași SCC** ⇔ se poate ajunge în ambele sensuri. Altfel drumul există cel mult
+  într-un singur sens, iar aplicația spune care. Componentele vin de la algoritmul ales (Tarjan,
+  Kosaraju sau Gabow). Răspunsul e verificat și prin căutarea directă a drumului.
+* **Drumul** se caută după unul din două criterii:
+  * *cele mai puține schimbări* (implicit): Dijkstra pe stările (stație, ruta în care ești),
+    cu costul ordonat lexicografic (schimbări, apoi stații);
+  * *cele mai puține stații*: BFS, O(V + E), apoi drumul se împarte greedy pe rute.
+* Drumul se desenează pe hartă: dus cu albastru, întors punctat cu verde. Se pot exclude
+  rutele închise în tab-ul Simulare.
+
+Exemplu pe rețeaua reală, Parcul Grădina Botanică → Judecătoria sect. Ciocana: cu cele mai
+puține stații ies 26 de segmente și 8 schimbări; cu cele mai puține schimbări ies 38 de segmente
+și doar 2 schimbări (36 → 23 → PORT).
+
+```
+GET /api/connection?from=<stop_id>&to=<stop_id>&algorithm=gabow&mode=transfers&closed=<route_id>,...
+```
+
 ## Modul consolă
 
 Meniu text (încărcare, sumar, închidere rută, rute critice, punți, condensare, benchmark,
@@ -83,7 +106,7 @@ src/main/java/com/eclipse/tarjanapa/
 ├── graph/               TransitGraph (stații ↔ indici, rute pe arce) și GraphBuilder
 ├── tranzy/              client HTTP (retry/backoff), cache JSON, parser GTFS tolerant
 ├── analysis/            starea rețelei, închidere rută, rute critice, live, punți/condensare,
-│                        benchmark, export CSV — tot Java simplu, fără Spring
+│                        conexiunea dintre două stații, benchmark, export CSV — tot Java simplu, fără Spring
 ├── service/             NetworkService (încărcare + analize), configurare Spring
 ├── web/                 API REST
 └── console/             ConsoleApp
@@ -124,6 +147,7 @@ Tarjan recursiv și iterativ dau exact același număr de operații: 5·V când 
 | GET | `/api/network/edges` | arce cu rute |
 | GET | `/api/routes` | lista rutelor |
 | POST | `/api/simulate/close` | `{"routeIds": [...], "liveOnly": false, "algorithm": "gabow"}`: stațiile desprinse |
+| GET | `/api/connection?from=&to=&mode=transfers\|stops&closed=` | conexiunea dintre două stații (ambele sensuri, aceeași SCC, drumul pe rute) |
 | GET | `/api/analysis/critical-routes?limit=20` | clasamentul rutelor critice |
 | GET | `/api/analysis/bridges` | punți și puncte de articulație |
 | GET | `/api/analysis/condensation` | graful condensat, surse, destinații, arce minime de adăugat |

@@ -4,6 +4,7 @@ import com.eclipse.tarjanapa.algorithms.SccChoice;
 import com.eclipse.tarjanapa.algorithms.SccResult;
 import com.eclipse.tarjanapa.analysis.Benchmark;
 import com.eclipse.tarjanapa.analysis.ClosureAnalysis;
+import com.eclipse.tarjanapa.analysis.ConnectionAnalysis;
 import com.eclipse.tarjanapa.analysis.CriticalRoutesAnalysis;
 import com.eclipse.tarjanapa.analysis.LiveAnalysis;
 import com.eclipse.tarjanapa.analysis.NetworkState;
@@ -155,6 +156,21 @@ public class ApiController {
         }
         return new ApiDtos.ClosureDto(run(choice, r.sccAfter()), r.closedRoutes(), r.unknownRoutes(), liveOnly,
                 r.before(), r.after(), r.detachedCount(), r.detachedStops());
+    }
+
+    /**
+     * Conexiunea dintre două stații: accesibilitatea în ambele sensuri, aceeași SCC
+     * sau nu, și drumul cu cele mai puține stații, împărțit pe rute.
+     * {@code closed} = rute închise (opțional), ca în simulare;
+     * {@code mode} = {@code transfers} (implicit, cele mai puține schimbări) sau {@code stops}.
+     */
+    @GetMapping("/connection")
+    public ConnectionAnalysis.Connection connection(@RequestParam String from, @RequestParam String to,
+                                                    @RequestParam(required = false) List<String> closed,
+                                                    @RequestParam(required = false) String algorithm,
+                                                    @RequestParam(required = false) String mode) {
+        return service.connection(from, to, closed == null ? Set.of() : new LinkedHashSet<>(closed),
+                SccChoice.parse(algorithm), ConnectionAnalysis.Mode.parse(mode));
     }
 
     @GetMapping("/analysis/critical-routes")

@@ -3,10 +3,12 @@ package com.eclipse.tarjanapa.service;
 import com.eclipse.tarjanapa.algorithms.SccChoice;
 import com.eclipse.tarjanapa.analysis.Benchmark;
 import com.eclipse.tarjanapa.analysis.ClosureAnalysis;
+import com.eclipse.tarjanapa.analysis.ConnectionAnalysis;
 import com.eclipse.tarjanapa.analysis.CsvExporter;
 import com.eclipse.tarjanapa.analysis.LiveAnalysis;
 import com.eclipse.tarjanapa.analysis.NetworkState;
 import com.eclipse.tarjanapa.graph.GraphBuilder;
+import com.eclipse.tarjanapa.graph.TransitGraph;
 import com.eclipse.tarjanapa.model.Agency;
 import com.eclipse.tarjanapa.model.Vehicle;
 import com.eclipse.tarjanapa.tranzy.TranzyDataSource;
@@ -114,6 +116,20 @@ public class NetworkService {
     public ClosureAnalysis.ClosureResult simulateClosure(Set<String> routeIds, SccChoice choice) {
         NetworkSnapshot s = snapshot();
         return new ClosureAnalysis(choice.create()).simulate(s.graph(), s.view(choice).scc(), routeIds);
+    }
+
+    /**
+     * Conexiunea dintre două stații, cu algoritmul ales; dacă {@code closedRoutes}
+     * nu e gol, se caută în rețeaua fără acele rute (ca în simulare).
+     */
+    public ConnectionAnalysis.Connection connection(String fromStopId, String toStopId, Set<String> closedRoutes,
+                                                    SccChoice choice, ConnectionAnalysis.Mode mode) {
+        NetworkSnapshot s = snapshot();
+        if (closedRoutes == null || closedRoutes.isEmpty()) {
+            return ConnectionAnalysis.find(s.graph(), s.view(choice).scc(), fromStopId, toStopId, mode);
+        }
+        TransitGraph g = s.graph().withoutRoutes(closedRoutes);
+        return ConnectionAnalysis.find(g, choice.create().run(g.intGraph()), fromStopId, toStopId, mode);
     }
 
     public LiveAnalysis.LiveResult live(boolean forceRefresh, SccChoice choice) {

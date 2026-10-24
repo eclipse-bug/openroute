@@ -41,12 +41,14 @@
       <div><span class="dot detached"></span> desprinse după simulare</div>
       <div><span class="dot inactive"></span> fără rute active</div>
       <div><span class="line bridge"></span> punte (segment fără alternativă)</div>
+      <div><span class="line path"></span> conexiune A → B (și înapoi, punctat)</div>
     </div>
   </section>
 
   <aside>
     <nav class="tabs">
       <button data-tab="simulate" class="active">Simulare</button>
+      <button data-tab="connect">Conexiune</button>
       <button data-tab="critical">Rute critice</button>
       <button data-tab="structure">Structură</button>
       <button data-tab="benchmark">Benchmark</button>
@@ -62,6 +64,28 @@
         <span id="closedCount" class="muted"></span>
       </div>
       <div id="simResult"></div>
+    </div>
+
+    <div id="tab-connect" class="tab">
+      <p class="hint">Alegeți două stații (sau pe hartă: click pe stație → „De aici” / „Până aici”).
+        Se verifică în ce sensuri se poate ajunge, dacă sunt în aceeași componentă tare conexă
+        și se afișează drumul, împărțit pe rute, după criteriul ales mai jos.</p>
+      <div class="conn-form">
+        <label>De la <input id="connFrom" type="search" list="stopOptions" placeholder="Caută stația de plecare…"></label>
+        <button id="swapBtn" class="secondary" title="Inversează plecarea și sosirea">⇅</button>
+        <label>Până la <input id="connTo" type="search" list="stopOptions" placeholder="Caută stația de sosire…"></label>
+      </div>
+      <div class="row" role="radiogroup" aria-label="Criteriul drumului">
+        <label class="toggle"><input type="radio" name="connMode" value="transfers" checked> cele mai puține schimbări</label>
+        <label class="toggle"><input type="radio" name="connMode" value="stops"> cele mai puține stații</label>
+      </div>
+      <label class="toggle"><input type="checkbox" id="connUseClosed"> fără rutele închise în tab-ul Simulare</label>
+      <div class="row">
+        <button id="connectBtn">Caută conexiunea</button>
+        <button id="connClearBtn" class="secondary">Șterge</button>
+      </div>
+      <div id="connResult"></div>
+      <datalist id="stopOptions"></datalist>
     </div>
 
     <div id="tab-critical" class="tab">

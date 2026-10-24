@@ -4,6 +4,7 @@ import com.eclipse.tarjanapa.TarjanApaApplication;
 import com.eclipse.tarjanapa.algorithms.SccChoice;
 import com.eclipse.tarjanapa.analysis.Benchmark;
 import com.eclipse.tarjanapa.analysis.ClosureAnalysis;
+import com.eclipse.tarjanapa.analysis.ConnectionAnalysis;
 import com.eclipse.tarjanapa.analysis.CriticalRoutesAnalysis;
 import com.eclipse.tarjanapa.analysis.NetworkState;
 import com.eclipse.tarjanapa.analysis.StopInfo;
@@ -11,6 +12,7 @@ import com.eclipse.tarjanapa.analysis.StructureAnalysis;
 import com.eclipse.tarjanapa.graph.TransitGraph;
 import com.eclipse.tarjanapa.model.Agency;
 import com.eclipse.tarjanapa.model.Route;
+import com.eclipse.tarjanapa.model.Stop;
 import com.eclipse.tarjanapa.service.NetworkService;
 import com.eclipse.tarjanapa.service.NetworkSnapshot;
 import com.eclipse.tarjanapa.service.NoDataException;
@@ -25,6 +27,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.text.Normalizer;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -84,6 +87,7 @@ public final class ConsoleApp {
             out.println(" 9. Reîncarcă forțat din Tranzy");
             out.println(" A. Alege algoritmul SCC (Tarjan / Kosaraju / Gabow)");
             out.println(" C. Compară cei 3 algoritmi pe rețeaua reală");
+            out.println(" D. Conexiune între două stații");
             out.println(" 0. Ieșire");
             String choice = ask("Opțiune");
             if (choice == null || choice.equals("0")) {
@@ -102,6 +106,7 @@ public final class ConsoleApp {
                     case "9" -> load(true);
                     case "A" -> chooseAlgorithm();
                     case "C" -> compareAlgorithms();
+                    case "D" -> connection();
                     default -> out.println("Opțiune necunoscută.");
                 }
             } catch (TranzyException | NoDataException | IllegalArgumentException | IllegalStateException e) {
@@ -164,6 +169,84 @@ public final class ConsoleApp {
         }
         out.println("Toți trei au găsit exact aceleași componente tare conexe.");
         out.println("(Timpul e măsurat la prima rulare; pentru medii cu warm-up folosiți opțiunea 7, Benchmark.)");
+    }
+
+    /** Conexiunea dintre două stații: în ce sensuri se poate ajunge și pe ce drum. */
+    private void connection() throws IOException {
+        TransitGraph g = service.snapshot().graph();
+        String from = pickStop(g, "Stația de plecare (nume sau id)");
+        if (from == null) {
+            return;
+        }
+        String to = pickStop(g, "Stația de sosire (nume sau id)");
+        if (to == null) {
+            return;
+        }
+        String m = ask("Criteriu: 1 = cele mai puține schimbări (implicit), 2 = cele mai puține stații");
+        ConnectionAnalysis.Mode mode = "2".equals(m == null ? "" : m.trim())
+                ? ConnectionAnalysis.Mode.STOPS : ConnectionAnalysis.Mode.TRANSFERS;
+        ConnectionAnalysis.Connection c = service.connection(from, to, Set.of(), algorithm, mode);
+        out.println();
+        out.printf("%s → %s   (SCC #%d și SCC #%d, calculate cu %s)%n", c.from().name(), c.to().name(),
+                c.fromComponent(), c.toComponent(), algorithm.label());
+        out.println(c.explanation());
+        printPath("Dus", c.forward());
+        printPath("Întors", c.backward());
+    }
+
+    private void printPath(String title, ConnectionAnalysis.Path p) {
+        if (!p.found()) {
+            out.println(title + ": nu există drum.");
+            return;
+        }
+        out.printf("%s: %d segmente, %d schimbări de rută%n", title, p.segments(), p.transfers());
+        for (ConnectionAnalysis.Leg leg : p.legs()) {
+            out.printf("  ruta %-5s %-10s %s → %s (%d stații)%n", leg.routeLabel(), leg.routeType(),
+                    leg.stops().get(0).name(), leg.stops().get(leg.stops().size() - 1).name(), leg.segments());
+        }
+    }
+
+    /** Caută o stație după id sau după o parte din nume (fără diacritice); cere alegerea dacă sunt mai multe. */
+    private String pickStop(TransitGraph g, String prompt) throws IOException {
+        String q = ask(prompt);
+        if (q == null || q.isBlank()) {
+            return null;
+        }
+        q = q.trim();
+        if (g.indexOf(q) >= 0) {
+            return q;
+        }
+        String needle = fold(q);
+        List<Stop> matches = g.stops().stream().filter(s -> fold(s.name()).contains(needle)).toList();
+        if (matches.isEmpty()) {
+            out.println("Nicio stație nu conține „" + q + "”.");
+            return null;
+        }
+        if (matches.size() == 1) {
+            return matches.get(0).id();
+        }
+        int shown = Math.min(15, matches.size());
+        for (int i = 0; i < shown; i++) {
+            Stop s = matches.get(i);
+            out.printf(" %2d. %s (id %s)  rute: %s%n", i + 1, s.name(), s.id(),
+                    String.join(", ", g.routeLabelsAtStop(g.indexOf(s.id()))));
+        }
+        if (matches.size() > shown) {
+            out.println("  … încă " + (matches.size() - shown) + "; scrieți un nume mai exact.");
+        }
+        String pick = ask("Numărul stației");
+        try {
+            int k = Integer.parseInt(pick.trim());
+            return k >= 1 && k <= shown ? matches.get(k - 1).id() : null;
+        } catch (NumberFormatException | NullPointerException e) {
+            return null;
+        }
+    }
+
+    /** Text fără diacritice și cu litere mici, pentru căutare. */
+    private static String fold(String s) {
+        return Normalizer.normalize(s == null ? "" : s, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "").toLowerCase(Locale.ROOT);
     }
 
     private void summary() {
